@@ -15,7 +15,7 @@ if !exists("g:disassemble_default_compilation_command")
 endif
 
 if !exists("g:disassemble_default_objdump_command")
-  let g:disassemble_default_objdump_command = '"objdump --demangle --line-numbers --file-headers --file-offsets --source-comment --no-show-raw-insn --disassemble " . expand("%:r")'
+  let g:disassemble_default_objdump_command = '"objdump --demangle --line-numbers --file-headers --file-offsets --source-comment --no-show-raw-insn --disassemble -M intel " . expand("%:r")'
 endif
 
 if !exists("g:disassemble_default_binary_file")
@@ -68,12 +68,12 @@ function! s:setConfiguration()
   " Create the variables to store the temp files
   let b:asm_tmp_file = get(b:, "asm_tmp_file", tempname())
   let b:error_tmp_file = get(b:, "error_tmp_file", tempname())
-  
+
   " Get the default commands from the global namespace
   execute("let l:default_compilation_command = " . g:disassemble_default_compilation_command)
   execute("let l:default_objdump_command = " .  g:disassemble_default_objdump_command)
   execute("let l:default_binary_file = " . g:disassemble_default_binary_file)
-  
+
   " Set the default values for the compilation and objdump commands
   let b:disassemble_config = get( b:, "disassemble_config", {
         \ "compilation": l:default_compilation_command,
@@ -108,14 +108,14 @@ endfunction
 
 function! disassemble#SaveConfig() abort
   call s:getConfig()
-  
+
   let l:config_file = printf("%s.%s", expand("%"), g:disassemble_configuration_extension)
   let l:output_configuration = []
-  
+
   call add(l:output_configuration, printf("compile: %s", b:disassemble_config["compilation"]))
   call add(l:output_configuration, printf("objdump: %s", b:disassemble_config["objdump"]))
   call add(l:output_configuration, printf("binary_file: %s", b:disassemble_config["binary_file"]))
-  
+
   call writefile(l:output_configuration, l:config_file)
   echomsg "Disassemble configuration saved to '" . l:config_file . "'"
 endfunction
@@ -222,14 +222,14 @@ function! s:get_objdump()
       echomsg "Automatic compilation is disabled for this buffer; we can not have a up-to-date ELF file to work on..."
       echohl None
       return 1
-      
+
     else
       if s:do_compile()
         return 1
       endif
       return s:get_objdump()
     endif
-    
+
   else
     return 0
 
