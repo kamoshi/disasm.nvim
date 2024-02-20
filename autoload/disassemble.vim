@@ -1,34 +1,4 @@
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-" Configuration
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-
-if !exists("g:disassemble_focus_on_second_call")
-  let g:disassemble_focus_on_second_call = v:false
-endif
-
-if !exists("g:disassemble_enable_compilation")
-  let g:disassemble_enable_compilation = v:true
-endif
-
-if !exists("g:disassemble_default_compilation_command")
-  let g:disassemble_default_compilation_command = 'printf( "gcc %s -o %s -g", expand("%"), expand("%:r") )'
-endif
-
-if !exists("g:disassemble_default_objdump_command")
-  let g:disassemble_default_objdump_command = '"objdump --demangle --line-numbers --file-headers --file-offsets --source-comment --no-show-raw-insn --disassemble -M intel " . expand("%:r")'
-endif
-
-if !exists("g:disassemble_default_binary_file")
-  let g:disassemble_default_binary_file = 'expand("%:r")'
-endif
-
-if !exists("g:disassemble_configuration_extension")
-  let g:disassemble_configuration_extension = "disconfig"
-endif
-
-if !exists("g:disassemble_autosave")
-  let g:disassemble_autosave = v:true
-endif
+let s:core = luaeval('require "disasm.core"')
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Configuration functions
@@ -237,42 +207,6 @@ function! s:get_objdump()
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-" Data processing
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-
-function! s:searchCurrentLine()
-  " Search the current line
-  let l:current_line_checked = line(".")
-  let l:pos_current_line_in_asm = ["", -1]
-  let l:lines_searched = 0
-
-  while l:pos_current_line_in_asm[1] < 0
-    let l:pos_current_line_in_asm = matchstrpos(b:objdump_asm_output, expand("%:t") . ":" . l:current_line_checked . '\(\s*(discriminator \d*)\)*$')
-
-    let l:current_line_checked += 1
-
-    let l:lines_searched += 1
-    if l:lines_searched >= 20
-      echohl WarningMsg
-      echomsg "this is line not found in the asm file ... ? contact the maintainer with an example of this situation"
-      echohl None
-      return [-1, -1]
-    endif
-  endwhile
-
-  " Search the next occurence of the filename
-  let l:pos_next_line_in_asm = matchstrpos(b:objdump_asm_output, expand("%:t") . ":", l:pos_current_line_in_asm[1] + 1)
-
-  " If not found, it's probably because this code block is at the end of a
-  " section. This will search the start of the next section.
-  if l:pos_next_line_in_asm[1] == -1
-    let l:pos_next_line_in_asm = matchstrpos(b:objdump_asm_output, '\v^\x+\s*', l:pos_current_line_in_asm[1] + 1)
-  endif
-
-  return [l:pos_current_line_in_asm[1], l:pos_next_line_in_asm[1]]
-endfunction
-
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Main functions
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
@@ -306,7 +240,7 @@ function! disassemble#Disassemble()
     return 1
   endif
 
-  let [l:pos_current_line_in_asm, l:pos_next_line_in_asm] = s:searchCurrentLine()
+  let [l:pos_current_line_in_asm, l:pos_next_line_in_asm] = s:core.searchCurrentLine()
   if l:pos_current_line_in_asm == -1
     return 1
   endif
@@ -356,7 +290,7 @@ function! disassemble#DisassembleFull()
     return 1
   endif
 
-  let [l:pos_current_line_in_asm, l:pos_next_line_in_asm] = s:searchCurrentLine()
+  let [l:pos_current_line_in_asm, l:pos_next_line_in_asm] = s:core.searchCurrentLine()
   if l:pos_current_line_in_asm == -1
     return 1
   endif
