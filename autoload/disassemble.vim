@@ -1,96 +1,6 @@
 let s:core = luaeval('require "disasm.core"')
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-" Configuration functions
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-
-function! s:getConfig()
-  " Create the variable to store the window id
-  let b:disassemble_popup_window_id = get(b:, "disassemble_popup_window_id", v:false)
-
-  " Check if the plugin should compile automatically
-  let b:enable_compilation = get(b:, "enable_compilation", g:disassemble_enable_compilation)
-
-  " Check if the plugin is already configured
-  if !exists("b:disassemble_config")
-    call s:setConfiguration()
-  endif
-endfunction
-
-function! disassemble#Config()
-  call s:setConfiguration()
-endfunction
-
-function! s:try_parse_configuration_lines(lines_with_potential_config)
-  call s:try_parse_configuration_single_target(a:lines_with_potential_config, "compile: ", "compilation")
-  call s:try_parse_configuration_single_target(a:lines_with_potential_config, "objdump: ", "objdump")
-  call s:try_parse_configuration_single_target(a:lines_with_potential_config, "binary_file: ", "binary_file")
-endfunction
-
-function! s:try_parse_configuration_single_target(lines, target_search, target_config)
-  let l:match = matchstrpos(a:lines, a:target_search)
-  if l:match[1] != -1
-    let b:disassemble_config[a:target_config] = a:lines[l:match[1]][l:match[3]:]
-  endif
-endfunction
-
-function! s:setConfiguration()
-  " Create the variables to store the temp files
-  let b:asm_tmp_file = get(b:, "asm_tmp_file", tempname())
-  let b:error_tmp_file = get(b:, "error_tmp_file", tempname())
-
-  " Get the default commands from the global namespace
-  execute("let l:default_compilation_command = " . g:disassemble_default_compilation_command)
-  execute("let l:default_objdump_command = " .  g:disassemble_default_objdump_command)
-  execute("let l:default_binary_file = " . g:disassemble_default_binary_file)
-
-  " Set the default values for the compilation and objdump commands
-  let b:disassemble_config = get( b:, "disassemble_config", {
-        \ "compilation": l:default_compilation_command,
-        \ "objdump": l:default_objdump_command,
-        \ "binary_file": l:default_binary_file
-        \ } )
-
-  " Try to parse the configuration file
-  let l:config_file = printf("%s.%s", expand("%"), g:disassemble_configuration_extension)
-  if filereadable(l:config_file)
-    call s:try_parse_configuration_lines(readfile(l:config_file))
-  endif
-
-  " Try to parse the start of the current file for configuration
-  call s:try_parse_configuration_lines(getline(1,10))
-
-  " Ask the user for the compilation and objdump extraction commands
-  if b:enable_compilation
-    let b:disassemble_config["compilation"] = input("compilation command> ", b:disassemble_config["compilation"])
-  endif
-
-  let b:disassemble_config["objdump"] = input("objdump command> ", b:disassemble_config["objdump"])
-  let b:disassemble_config["objdump_with_redirect"] = b:disassemble_config["objdump"]
-        \ . " 1>" . b:asm_tmp_file
-        \ . " 2>" . b:error_tmp_file
-
-  redraw
-  echomsg "Disassemble.nvim configured for this buffer!"
-
-  return
-endfunction
-
-function! disassemble#SaveConfig() abort
-  call s:getConfig()
-
-  let l:config_file = printf("%s.%s", expand("%"), g:disassemble_configuration_extension)
-  let l:output_configuration = []
-
-  call add(l:output_configuration, printf("compile: %s", b:disassemble_config["compilation"]))
-  call add(l:output_configuration, printf("objdump: %s", b:disassemble_config["objdump"]))
-  call add(l:output_configuration, printf("binary_file: %s", b:disassemble_config["binary_file"]))
-
-  call writefile(l:output_configuration, l:config_file)
-  echomsg "Disassemble configuration saved to '" . l:config_file . "'"
-endfunction
-
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Compilation function
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
@@ -223,7 +133,7 @@ function! disassemble#Disassemble()
   endif
 
   " Load the configuration for this buffer
-  call s:getConfig()
+  call s:core.getConfig()
 
   " Remove or focus the popup
   if b:disassemble_popup_window_id
@@ -283,7 +193,7 @@ function! disassemble#DisassembleFull()
   endif
 
   " Load the configuration for this buffer
-  call s:getConfig()
+  call s:core.getConfig()
 
   " Extract the objdump content to the correct buffer variables
   if s:get_objdump()
