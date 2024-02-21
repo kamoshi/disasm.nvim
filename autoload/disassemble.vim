@@ -1,93 +1,6 @@
 let s:core = luaeval('require "disasm.core"')
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-" Objectdump extraction
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-
-function! s:do_objdump()
-  " Reset the output variables
-  let b:compilation_error = v:false
-  let b:objdump_asm_output = v:false
-
-  " Extract the objdump information to the `error_tmp_file` and `asm_tmp_file` files
-  call system(b:disassemble_config["objdump_with_redirect"])
-  if v:shell_error
-    return 1
-  endif
-
-  " Get the error from the temporary file
-  let b:compilation_error = readfile(b:error_tmp_file)
-  let b:compilation_error = string(b:compilation_error)
-
-  " Return the error code 128 if the C file is more recent that the ELF file
-  if match(b:compilation_error, "is more recent than object file") != -1
-    return 128
-  endif
-
-  " Get the content of the objdump file
-  let b:objdump_asm_output = systemlist("expand -t 4 " . b:asm_tmp_file)
-  if v:shell_error
-    return 1
-  endif
-
-  " Return OK
-  return 0
-endfunction
-
-function! s:get_objdump()
-  " Check the presence of the ELF file
-  if !filereadable(b:disassemble_config["binary_file"])
-    if !b:enable_compilation
-      echohl WarningMsg
-      echomsg "the file '" . b:disassemble_config["binary_file"] . "' is not readable"
-      echohl None
-      return 1
-    else
-      if s:core.do_compile()
-        return 1
-      endif
-    endif
-  endif
-
-  " Check if the binary file has debug informations
-  let b:has_debug_info = system("file " . b:disassemble_config["binary_file"])
-  if match(b:has_debug_info, "with debug_info") == -1
-    echohl WarningMsg
-    echomsg "the file '" . b:disassemble_config["binary_file"] . "' does not have debug information"
-    echohl None
-    return 1
-  endif
-
-  " Get the objdump content
-  let l:objdump_return_code = s:do_objdump()
-
-  if l:objdump_return_code == 1
-    " Unknown error in the function
-    return 1
-
-  elseif l:objdump_return_code == 128
-    " Check if the C source code is more recent than the object file
-    " Try to recompile and redump the objdump content
-    if !b:enable_compilation
-      echohl WarningMsg
-      echomsg "Automatic compilation is disabled for this buffer; we can not have a up-to-date ELF file to work on..."
-      echohl None
-      return 1
-
-    else
-      if s:core.do_compile()
-        return 1
-      endif
-      return s:get_objdump()
-    endif
-
-  else
-    return 0
-
-  endif
-endfunction
-
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Main functions
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
@@ -117,7 +30,7 @@ function! disassemble#Disassemble()
   endif
 
   " Extract the objdump content to the correct buffer variables
-  if s:get_objdump()
+  if s:core.get_objdump()
     return 1
   endif
 

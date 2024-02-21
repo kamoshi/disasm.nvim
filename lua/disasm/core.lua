@@ -145,6 +145,84 @@ function M.do_compile()
 end
 
 -- """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+-- " Objectdump extraction
+-- """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+function M.do_objdump()
+  -- Reset the output variables
+  vim.b.compilation_error = false
+  vim.b.objdump_asm_output = false
+
+  -- Extract the objdump information to the `error_tmp_file` and `asm_tmp_file` files
+  vim.fn.system(vim.b.disassemble_config.objdump_with_redirect)
+  if vim.v.shell_error == 1 then
+    return 1
+  end
+
+  -- Get the error from the temporary file
+  vim.b.compilation_error = vim.fn.readfile(vim.b.error_tmp_file)
+  vim.b.compilation_error = vim.fn.string(vim.b.compilation_error)
+
+  -- Return the error code 128 if the C file is more recent that the ELF file
+  if vim.fn.match(vim.b.compilation_error, "is more recent than object file") ~= -1 then
+    return 128
+  end
+
+  -- Get the content of the objdump file
+  vim.b.objdump_asm_output = vim.fn.systemlist("expand -t 4 " .. vim.b.asm_tmp_file)
+  if vim.v.shell_error == 1 then
+    return 1
+  end
+
+  -- Return OK
+  return 0
+end
+
+
+function M.get_objdump()
+  -- Check the presence of the ELF file
+  if vim.fn.filereadable(vim.b.disassemble_config["binary_file"]) ~= 1 then
+    if not vim.b.enable_compilation then
+      vim.notify("the file '" .. vim.b.disassemble_config["binary_file"] .. "' is not readable", vim.log.levels.WARN)
+      return 1
+    else
+      if M.do_compile() then
+        return 1
+      end
+    end
+  end
+
+  -- Check if the binary file has debug informations
+  vim.b.has_debug_info = vim.fn.system("file " .. vim.b.disassemble_config["binary_file"])
+  if vim.fn.match(vim.b.has_debug_info, "with debug_info") == -1 then
+    vim.notify("the file '" .. vim.b.disassemble_config["binary_file"] .. "' does not have debug information", vim.log.levels.WARN)
+    return 1
+  end
+
+  -- Get the objdump content
+  local objdump_return_code = M.do_objdump()
+
+  if objdump_return_code == 1 then
+    -- Unknown error in the function
+    return 1
+  elseif objdump_return_code == 128 then
+    -- Check if the C source code is more recent than the object file
+    -- Try to recompile and redump the objdump content
+    if not vim.b.enable_compilation then
+      vim.notify("Automatic compilation is disabled for this buffer; we can not have a up-to-date ELF file to work on...", vim.log.levels.WARN)
+      return 1
+    else
+      if M.do_compile() > 0 then
+        return 1
+      end
+      return M.get_objdump()
+    end
+  else
+    return 0
+  end
+end
+
+-- """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 -- " Data processing
 -- """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
