@@ -113,7 +113,6 @@ function M.disassemble_Config()
   M.setConfiguration()
 end
 
-
 function M.disassemble_SaveConfig()
   M.getConfig()
 
@@ -126,6 +125,23 @@ function M.disassemble_SaveConfig()
 
   vim.fn.writefile(output_configuration, config_file)
   vim.notify("Disassemble configuration saved to '" .. config_file .. "'")
+end
+
+-- """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+-- " Compilation function
+-- """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+function M.do_compile()
+  local compilation_result = vim.fn.system(vim.b.disassemble_config.compilation)
+  if vim.v.shell_error == 1 then
+    vim.notify("Error while compiling. Check the compilation command.", vim.log.levels.WARN)
+    vim.notify("> " .. vim.b.disassemble_config.compilation, vim.log.levels.WARN)
+    vim.notify(compilation_result , vim.log.levels.ERROR)
+
+    return 1
+  else
+    return 0
+  end
 end
 
 -- """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""

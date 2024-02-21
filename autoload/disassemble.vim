@@ -1,35 +1,6 @@
 let s:core = luaeval('require "disasm.core"')
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-" Compilation function
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-
-function! s:do_compile()
-  let l:compilation_result = system(b:disassemble_config["compilation"])
-  if v:shell_error
-    echohl WarningMsg
-    echomsg "Error while compiling. Check the compilation command."
-    echo "\n"
-
-    echohl Question
-    echomsg "> " . b:disassemble_config["compilation"]
-    echo "\n"
-
-    echohl ErrorMsg
-    echo l:compilation_result
-    echo "\n"
-
-    echohl None
-
-    return 1
-
-  else
-    return 0
-
-  endif
-endfunction
-
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Objectdump extraction
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
@@ -72,7 +43,7 @@ function! s:get_objdump()
       echohl None
       return 1
     else
-      if s:do_compile()
+      if s:core.do_compile()
         return 1
       endif
     endif
@@ -104,7 +75,7 @@ function! s:get_objdump()
       return 1
 
     else
-      if s:do_compile()
+      if s:core.do_compile()
         return 1
       endif
       return s:get_objdump()
