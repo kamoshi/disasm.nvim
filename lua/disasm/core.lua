@@ -39,7 +39,7 @@ end
 function M.try_parse_configuration_single_target(lines, target_search, target_config)
   local match = vim.fn.matchstrpos(lines, target_search)
   if match[2] ~= -1 then
-    vim.b.disassemble_config[target_config] = string.sub(lines[match[2]], match[4])
+    vim.b.disassemble_config[target_config] = string.sub(lines[match[2] + 1], match[4] + 1)
   end
 end
 
@@ -263,7 +263,7 @@ function M.disassemble_Disassemble()
   -- Close the current window if we are already in a popup buffer and want to
   -- get a popup, which make no sense in this context
   if vim.b.disassemble_this_is_a_popup_buffer then
-    vim.cmd [[silent! call nvim_win_close(0, v:true)]]
+    vim.api.nvim_win_close(0, true)
     return 0
   end
 
@@ -325,8 +325,71 @@ function M.disassemble_Disassemble()
   vim.api.nvim_create_autocmd({ 'CursorMoved', 'BufLeave' }, {
     group = vim.api.nvim_create_augroup('disassembleOnCursorMoveGroup', { clear = true }),
     pattern = { '*.c', '*.cpp' },
-    command = [[call disassemble#Close()]]
+    callback = M.disassemble_Close,
   })
+end
+
+function M.disassemble_DisassembleFull()
+  if vim.g.disassemble_autosave then
+    vim.cmd [[silent! write]]
+  end
+
+  --  the configuration for this buffer
+  M.getConfig()
+
+  -- Extract the objdump content to the correct buffer variables
+  if M.get_objdump() == 1 then
+    return 1
+  end
+
+  local pos_current_line_in_asm = M.searchCurrentLine()[1]
+  if pos_current_line_in_asm == -1 then
+    return 1
+  end
+
+  -- Create or reuse the last buffer
+  if not vim.b.buffer_full_asm then
+    vim.b.buffer_full_asm = vim.api.nvim_create_buf(true, true)
+    vim.api.nvim_buf_set_name(vim.b.buffer_full_asm, "[Disassembled] " .. vim.b.disassemble_config["binary_file"])
+  else
+    vim.api.nvim_buf_set_option(vim.b.buffer_full_asm, "readonly", false)
+  end
+
+  -- Set the content to the buffer
+  vim.api.nvim_buf_set_lines(vim.b.buffer_full_asm, 0, 0, false, vim.b.objdump_asm_output)
+
+  -- Set option for that buffer
+  vim.api.nvim_buf_set_option(vim.b.buffer_full_asm, "filetype", "asm")
+  vim.api.nvim_buf_set_option(vim.b.buffer_full_asm, "readonly", true)
+
+  -- Focus the buffer
+  vim.cmd [[execute 'buffer ' . b:buffer_full_asm]]
+
+  -- Open the current line
+  vim.api.nvim_win_set_cursor(0, { pos_current_line_in_asm+2, 0 })
+end
+
+function M.disassemble_Close()
+  if vim.b.auto_close then
+    if vim.b.disassemble_popup_window_id then
+      vim.api.nvim_win_close(vim.b.disassemble_popup_window_id, true)
+      vim.b.disassemble_popup_window_id = false
+
+      -- Remove the autocmd for the files for performances reasons
+      vim.api.nvim_clear_autocmds({ group = 'disassembleOnCursorMoveGroup' })
+    end
+  else
+    vim.b.auto_close = true
+  end
+end
+
+function M.disassemble_Focus()
+  vim.b.auto_close = false
+  if vim.b.disassemble_popup_window_id then
+    vim.api.nvim_set_current_win(vim.b.disassemble_popup_window_id)
+  else
+    vim.notify("No popup at the moment", vim.log.levels.WARN)
+  end
 end
 
 return M
