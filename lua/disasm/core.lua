@@ -50,98 +50,112 @@ end
 ---@param lines string[]
 local function try_parse_config(lines)
   return {
-    compilation = try_parse_config_line(lines, "compile: "),
-    objdump     = try_parse_config_line(lines, "objdump: "),
-    binary_file = try_parse_config_line(lines, "binary_file: ")
+    compilation = try_parse_config_line(lines, 'compile: '),
+    objdump     = try_parse_config_line(lines, 'objdump: '),
+    binary_file = try_parse_config_line(lines, 'binary_file: ')
   }
 end
 
----@param bufnr number
-local function setConfiguration(bufnr)
+local function load_config(bufnr)
   -- Create the variables to store the temp files
-  vim.b.asm_tmp_file   = vim.b.asm_tmp_file or vim.fn.tempname()
-  vim.b.error_tmp_file = vim.b.error_tmp_file or vim.fn.tempname()
+  vim.b[bufnr].tmp_file_asm = vim.b[bufnr].tmp_file_asm or vim.fn.tempname()
+  vim.b[bufnr].tmp_file_err = vim.b[bufnr].tmp_file_err or vim.fn.tempname()
+
+  local file = vim.fn.expand '%'
+  local root = vim.fn.expand '%:r'
 
   -- Get the default commands from the global namespace
-  local default_compilation_command = vim.fn.printf( "gcc %s -o %s -g", vim.fn.expand("%"), vim.fn.expand("%:r"))
-  local default_objdump_command = "objdump --demangle --line-numbers --file-headers --file-offsets --source-comment --no-show-raw-insn --disassemble -M intel " .. vim.fn.expand("%:r")
-  local default_binary_file = vim.fn.expand("%:r")
+  local default_objdump_command = "objdump --demangle --line-numbers --file-headers --file-offsets --source-comment --no-show-raw-insn --disassemble -M intel " .. root
 
   -- Set the default values for the compilation and objdump commands
-  local config = vim.b.disassemble_config or {
-    compilation = default_compilation_command,
+  local config = vim.b[bufnr].disassemble_config or {
+    compilation = vim.fn.printf( "gcc %s -o %s -g", file, root),
     objdump = default_objdump_command,
-    binary_file = default_binary_file,
+    binary_file = root,
     objdump_with_redirect = default_objdump_command
   }
 
   -- Try to parse the configuration file
-  local config_file = vim.fn.printf("%s.%s", vim.fn.expand("%"), vim.g.disassemble_configuration_extension)
+  local config_file = vim.fn.printf("%s.%s", file, vim.g.disassemble_configuration_extension)
   if vim.fn.filereadable(config_file) ~= 0 then
-    config = vim.tbl_extend('force', config, try_parse_config(vim.fn.readfile(config_file)))
+    local loaded = try_parse_config(vim.fn.readfile(config_file))
+    config.compilation = loaded.compilation or config.compilation
+    config.objdump     = loaded.objdump or config.objdump
+    config.binary_file = loaded.binary_file or config.binary_file
   end
 
   -- Try to parse the start of the current file for configuration
-  config = vim.tbl_extend('force', config, try_parse_config(vim.fn.getline(1,10)))
+  do
+    local loaded = try_parse_config(vim.fn.getline(1,10))
+    config.compilation = loaded.compilation or config.compilation
+    config.objdump     = loaded.objdump or config.objdump
+    config.binary_file = loaded.binary_file or config.binary_file
+  end
 
   -- Ask the user for the compilation and objdump extraction commands
   if vim.b.enable_compilation then
-    local compilation = vim.fn.input({ prompt = "compilation command> ", default = config.compilation })
-    config = vim.tbl_extend('force', config, { compilation = compilation })
+    config.compilation = vim.fn.input({ prompt = "compilation command> ", default = config.compilation })
   end
 
-  local objdump   = vim.fn.input({ prompt = "objdump command> ", default = config.objdump })
-  local objdump_r = objdump .. " 1>" .. vim.b.asm_tmp_file .. " 2>" .. vim.b.error_tmp_file
+  config.objdump               = vim.fn.input({ prompt = "objdump command> ", default = config.objdump })
+  config.objdump_with_redirect = config.objdump .. " 1>" .. vim.b[bufnr].tmp_file_asm .. " 2>" .. vim.b[bufnr].tmp_file_err
 
-  config = vim.tbl_extend('force', config, { objdump = objdump, objdump_with_redirect = objdump_r })
+  return config
+end
 
-  vim.b.disassemble_config = config
+function M.reconfigure()
+  local bufnr = vim.api.nvim_get_current_buf()
+  vim.b[bufnr].disassemble_config = load_config(bufnr)
 
   vim.cmd [[redraw]]
   vim.notify('Disassemble.nvim configured for this buffer!', vim.log.levels.INFO)
 end
 
-function M.getConfig()
+local function prepare()
+  local bufnr = vim.api.nvim_get_current_buf()
+
   -- Create the variable to store the window id
   vim.b.disassemble_popup_window_id = vim.b.disassemble_popup_window_id or false
 
   -- Check if the plugin should compile automatically
   vim.b.enable_compilation = vim.b.enable_compilation or vim.g.disassemble_enable_compilation
 
-  -- " Check if the plugin is already configured
-  if not vim.b.disassemble_config then
-    setConfiguration()
+  -- Check if the plugin is already configured
+  if not vim.b[bufnr].disassemble_config then
+    M.reconfigure()
   end
 end
 
-function M.disassemble_Config()
-  setConfiguration()
-end
+function M.save_config()
+  local bufnr = vim.api.nvim_get_current_buf()
 
-function M.disassemble_SaveConfig()
-  M.getConfig()
+  prepare()
 
-  local config_file = vim.fn.printf("%s.%s", vim.fn.expand("%"), vim.g.disassemble_configuration_extension)
-  local output_configuration = {
-    vim.fn.printf("compile: %s", vim.b.disassemble_config.compilation),
-    vim.fn.printf("objdump: %s", vim.b.disassemble_config.objdump),
-    vim.fn.printf("binary_file: %s", vim.b.disassemble_config.binary_file)
+  local config = vim.b[bufnr].disassemble_config
+  local file = vim.fn.printf("%s.%s", vim.fn.expand("%"), vim.g.disassemble_configuration_extension)
+  local data = {
+    "compile: "     .. config.compilation,
+    "objdump: "     .. config.objdump,
+    "binary_file: " .. config.binary_file,
   }
 
-  vim.fn.writefile(output_configuration, config_file)
-  vim.notify("Disassemble configuration saved to '" .. config_file .. "'")
+  vim.fn.writefile(data, file)
+  vim.notify("Disassemble configuration saved to '" .. file .. "'", vim.log.levels.INFO)
 end
 
 -- """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 -- " Compilation function
 -- """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
+---@param bufnr number
 ---@return boolean -- is failure?
-local function do_compile()
-  local result = vim.fn.system(vim.b.disassemble_config.compilation)
+local function do_compile(bufnr)
+  local config = vim.b[bufnr].disassemble_config
+  local result = vim.fn.system(config.compilation)
+
   if vim.v.shell_error == 1 then
     vim.notify(
-      'Error while compiling. Check the compilation command.\n> ' .. vim.b.disassemble_config.compilation .. '\n' .. result,
+      'Error while compiling. Check the compilation command.\n> ' .. config.compilation .. '\n' .. result,
       vim.log.levels.ERROR
     )
     return true
@@ -154,19 +168,22 @@ end
 -- " Objectdump extraction
 -- """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-function M.do_objdump()
+local function do_objdump()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local config = vim.b[bufnr].disassemble_config
+
   -- Reset the output variables
   vim.b.compilation_error = false
   vim.b.objdump_asm_output = false
 
-  -- Extract the objdump information to the `error_tmp_file` and `asm_tmp_file` files
-  vim.fn.system(vim.b.disassemble_config.objdump_with_redirect)
+  -- Extract the objdump information to the `tmp_file_err` and `tmp_file_asm` files
+  vim.fn.system(config.objdump_with_redirect)
   if vim.v.shell_error == 1 then
     return 1
   end
 
   -- Get the error from the temporary file
-  vim.b.compilation_error = vim.fn.readfile(vim.b.error_tmp_file)
+  vim.b.compilation_error = vim.fn.readfile(vim.b[bufnr].tmp_file_err)
   vim.b.compilation_error = vim.fn.string(vim.b.compilation_error)
 
   -- Return the error code 128 if the C file is more recent that the ELF file
@@ -175,7 +192,7 @@ function M.do_objdump()
   end
 
   -- Get the content of the objdump file
-  vim.b.objdump_asm_output = vim.fn.systemlist("expand -t 4 " .. vim.b.asm_tmp_file)
+  vim.b.objdump_asm_output = vim.fn.systemlist("expand -t 4 " .. vim.b[bufnr].tmp_file_asm)
   if vim.v.shell_error == 1 then
     return 1
   end
@@ -185,28 +202,31 @@ function M.do_objdump()
 end
 
 
-function M.get_objdump()
+local function get_objdump()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local config = vim.b[bufnr].disassemble_config
+
   -- Check the presence of the ELF file
-  if vim.fn.filereadable(vim.b.disassemble_config["binary_file"]) ~= 1 then
+  if vim.fn.filereadable(config.binary_file) ~= 1 then
     if not vim.b.enable_compilation then
-      vim.notify("the file '" .. vim.b.disassemble_config["binary_file"] .. "' is not readable", vim.log.levels.WARN)
+      vim.notify("the file '" .. config.binary_file .. "' is not readable", vim.log.levels.WARN)
       return 1
     else
-      if do_compile() then
+      if do_compile(bufnr) then
         return 1
       end
     end
   end
 
   -- Check if the binary file has debug informations
-  vim.b.has_debug_info = vim.fn.system("file " .. vim.b.disassemble_config["binary_file"])
+  vim.b.has_debug_info = vim.fn.system("file " .. config.binary_file)
   if vim.fn.match(vim.b.has_debug_info, "with debug_info") == -1 then
-    vim.notify("the file '" .. vim.b.disassemble_config["binary_file"] .. "' does not have debug information", vim.log.levels.WARN)
+    vim.notify("the file '" .. config.binary_file .. "' does not have debug information", vim.log.levels.WARN)
     return 1
   end
 
   -- Get the objdump content
-  local objdump_return_code = M.do_objdump()
+  local objdump_return_code = do_objdump()
 
   if objdump_return_code == 1 then
     -- Unknown error in the function
@@ -218,10 +238,10 @@ function M.get_objdump()
       vim.notify("Automatic compilation is disabled for this buffer; we can not have a up-to-date ELF file to work on...", vim.log.levels.WARN)
       return 1
     else
-      if do_compile() then
+      if do_compile(bufnr) then
         return 1
       end
-      return M.get_objdump()
+      return get_objdump()
     end
   else
     return 0
@@ -232,20 +252,20 @@ end
 -- " Data processing
 -- """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-function M.searchCurrentLine()
+local function searchCurrentLine()
   -- Search the current line
-  local current_line_checked = vim.fn.line '.'
+  local lineno = vim.fn.line '.'
   local pos_current_line_in_asm = { "", -1 }
   local lines_searched = 0
 
   while pos_current_line_in_asm[2] < 0 do
-    pos_current_line_in_asm = vim.fn.matchstrpos(vim.b.objdump_asm_output, vim.fn.expand('%:t') .. ':' .. current_line_checked .. [[\(\s*(discriminator \d*)\)*$]])
+    pos_current_line_in_asm = vim.fn.matchstrpos(vim.b.objdump_asm_output, vim.fn.expand('%:t') .. ':' .. lineno .. [[\(\s*(discriminator \d*)\)*$]])
 
-    current_line_checked = current_line_checked + 1
+    lineno = lineno + 1
 
     lines_searched = lines_searched + 1
     if lines_searched >= 20 then
-      vim.api.nvim_echo({{'this is line not found in the asm file ... ? contact the maintainer with an example of this situation', 'WarningMsg'}}, true, {})
+      vim.notify('This line is not included in the asm file', vim.log.levels.WARN)
       return { -1, -1 }
     end
   end
@@ -266,6 +286,8 @@ end
 -- """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 function M.disassemble_Disassemble()
+  local bufnr = vim.api.nvim_get_current_buf()
+
   -- Close the current window if we are already in a popup buffer and want to
   -- get a popup, which make no sense in this context
   if vim.b.disassemble_this_is_a_popup_buffer then
@@ -278,7 +300,7 @@ function M.disassemble_Disassemble()
   end
 
   -- Load the configuration for this buffer
-  M.getConfig()
+  prepare()
 
   -- Remove or focus the popup
   if vim.b.disassemble_popup_window_id then
@@ -291,11 +313,11 @@ function M.disassemble_Disassemble()
   end
 
   -- Extract the objdump content to the correct buffer variables
-  if M.get_objdump() == 1 then
+  if get_objdump() == 1 then
     return 1
   end
 
-  local res = M.searchCurrentLine()
+  local res = searchCurrentLine()
   local pos_current_line_in_asm, pos_next_line_in_asm = res[1], res[2]
   if pos_current_line_in_asm == -1 then
     return 1
@@ -336,19 +358,21 @@ function M.disassemble_Disassemble()
 end
 
 function M.disassemble_DisassembleFull()
+  local bufnr = vim.api.nvim_get_current_buf()
+
   if vim.g.disassemble_autosave then
     vim.cmd [[silent! write]]
   end
 
   --  the configuration for this buffer
-  M.getConfig()
+  prepare()
 
   -- Extract the objdump content to the correct buffer variables
-  if M.get_objdump() == 1 then
+  if get_objdump() == 1 then
     return 1
   end
 
-  local pos_current_line_in_asm = M.searchCurrentLine()[1]
+  local pos_current_line_in_asm = searchCurrentLine()[1]
   if pos_current_line_in_asm == -1 then
     return 1
   end
@@ -356,7 +380,7 @@ function M.disassemble_DisassembleFull()
   -- Create or reuse the last buffer
   if not vim.b.buffer_full_asm then
     vim.b.buffer_full_asm = vim.api.nvim_create_buf(true, true)
-    vim.api.nvim_buf_set_name(vim.b.buffer_full_asm, "[Disassembled] " .. vim.b.disassemble_config["binary_file"])
+    vim.api.nvim_buf_set_name(vim.b.buffer_full_asm, "[Disassembled] " .. vim.b[bufnr].disassemble_config["binary_file"])
   else
     vim.api.nvim_buf_set_option(vim.b.buffer_full_asm, "readonly", false)
   end
@@ -376,6 +400,8 @@ function M.disassemble_DisassembleFull()
 end
 
 function M.disassemble_Close()
+  local bufnr = vim.api.nvim_get_current_buf()
+
   if vim.b.auto_close then
     if vim.b.disassemble_popup_window_id then
       vim.api.nvim_win_close(vim.b.disassemble_popup_window_id, true)
