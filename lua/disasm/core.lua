@@ -255,5 +255,78 @@ function M.searchCurrentLine()
   return { pos_current_line_in_asm[2], pos_next_line_in_asm[2] }
 end
 
+-- """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+-- " Main functions
+-- """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+function M.disassemble_Disassemble()
+  -- Close the current window if we are already in a popup buffer and want to
+  -- get a popup, which make no sense in this context
+  if vim.b.disassemble_this_is_a_popup_buffer then
+    vim.cmd [[silent! call nvim_win_close(0, v:true)]]
+    return 0
+  end
+
+  if vim.g.disassemble_autosave then
+    vim.cmd [[silent! write]]
+  end
+
+  -- Load the configuration for this buffer
+  M.getConfig()
+
+  -- Remove or focus the popup
+  if vim.b.disassemble_popup_window_id then
+    if vim.g.disassemble_focus_on_second_call then
+      M.disassemble_Focus()
+      return 0
+    else
+      M.disassemble_Close()
+    end
+  end
+
+  -- Extract the objdump content to the correct buffer variables
+  if M.get_objdump() == 1 then
+    return 1
+  end
+
+  local res = M.searchCurrentLine()
+  local pos_current_line_in_asm, pos_next_line_in_asm = res[1], res[2]
+  if pos_current_line_in_asm == -1 then
+    return 1
+  end
+
+  -- Only select the current chunk of asm
+  vim.b.objdump_asm_output = {unpack(vim.b.objdump_asm_output, pos_current_line_in_asm + 1, pos_next_line_in_asm)}
+
+  -- Set the popup options
+  local width  = vim.fn.max(vim.fn.map(vim.fn.copy(vim.b.objdump_asm_output), "strlen(v:val)"))
+  local height = pos_next_line_in_asm - pos_current_line_in_asm
+
+  -- Create the popup window
+  local buf = vim.api.nvim_create_buf(false, true)
+  local opts = {
+    relative  = 'cursor',
+    width     = width,
+    height    = height,
+    col       = 0,
+    row       = 1,
+    anchor    = "NW",
+    style     = "minimal",
+    focusable = true,
+  }
+
+  vim.b.disassemble_popup_window_id = vim.api.nvim_open_win(buf, false, opts)
+
+  vim.api.nvim_buf_set_lines(buf, 0, height, false, vim.b.objdump_asm_output)
+  vim.api.nvim_buf_set_option(buf, "filetype", "asm")
+  vim.api.nvim_buf_set_var(buf, "disassemble_this_is_a_popup_buffer", true)
+  vim.api.nvim_win_set_cursor(vim.b.disassemble_popup_window_id, { 1, 0 })
+
+  vim.api.nvim_create_autocmd({ 'CursorMoved', 'BufLeave' }, {
+    group = vim.api.nvim_create_augroup('disassembleOnCursorMoveGroup', { clear = true }),
+    pattern = { '*.c', '*.cpp' },
+    command = [[call disassemble#Close()]]
+  })
+end
 
 return M
