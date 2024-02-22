@@ -93,7 +93,7 @@ local function load_config(bufnr)
   end
 
   -- Ask the user for the compilation and objdump extraction commands
-  if vim.b.enable_compilation then
+  if vim.b[bufnr].enable_compilation then
     config.compilation = vim.fn.input({ prompt = "compilation command> ", default = config.compilation })
   end
 
@@ -111,17 +111,18 @@ function M.reconfigure()
   vim.notify('Disassemble.nvim configured for this buffer!', vim.log.levels.INFO)
 end
 
-local function prepare()
-  local bufnr = vim.api.nvim_get_current_buf()
+---@param bufnr number
+local function prepare(bufnr)
+  local buffer = vim.b[bufnr]
 
   -- Create the variable to store the window id
-  vim.b.disassemble_popup_window_id = vim.b.disassemble_popup_window_id or false
+  buffer.disasm_popup_ref = buffer.disasm_popup_ref or false
 
   -- Check if the plugin should compile automatically
-  vim.b.enable_compilation = vim.b.enable_compilation or vim.g.disassemble_enable_compilation
+  buffer.enable_compilation = buffer.enable_compilation or vim.g.disassemble_enable_compilation
 
   -- Check if the plugin is already configured
-  if not vim.b[bufnr].disassemble_config then
+  if not buffer.disassemble_config then
     M.reconfigure()
   end
 end
@@ -129,7 +130,7 @@ end
 function M.save_config()
   local bufnr = vim.api.nvim_get_current_buf()
 
-  prepare()
+  prepare(bufnr)
 
   local config = vim.b[bufnr].disassemble_config
   local file = vim.fn.printf("%s.%s", vim.fn.expand("%"), vim.g.disassemble_configuration_extension)
@@ -173,8 +174,8 @@ local function do_objdump()
   local config = vim.b[bufnr].disassemble_config
 
   -- Reset the output variables
-  vim.b.compilation_error = false
-  vim.b.objdump_asm_output = false
+  vim.b[bufnr].compilation_error = false
+  vim.b[bufnr].objdump_asm_output = false
 
   -- Extract the objdump information to the `tmp_file_err` and `tmp_file_asm` files
   vim.fn.system(config.objdump_with_redirect)
@@ -183,16 +184,16 @@ local function do_objdump()
   end
 
   -- Get the error from the temporary file
-  vim.b.compilation_error = vim.fn.readfile(vim.b[bufnr].tmp_file_err)
-  vim.b.compilation_error = vim.fn.string(vim.b.compilation_error)
+  vim.b[bufnr].compilation_error = vim.fn.readfile(vim.b[bufnr].tmp_file_err)
+  vim.b[bufnr].compilation_error = vim.fn.string(vim.b[bufnr].compilation_error)
 
   -- Return the error code 128 if the C file is more recent that the ELF file
-  if vim.fn.match(vim.b.compilation_error, "is more recent than object file") ~= -1 then
+  if vim.fn.match(vim.b[bufnr].compilation_error, "is more recent than object file") ~= -1 then
     return 128
   end
 
   -- Get the content of the objdump file
-  vim.b.objdump_asm_output = vim.fn.systemlist("expand -t 4 " .. vim.b[bufnr].tmp_file_asm)
+  vim.b[bufnr].objdump_asm_output = vim.fn.systemlist("expand -t 4 " .. vim.b[bufnr].tmp_file_asm)
   if vim.v.shell_error == 1 then
     return 1
   end
@@ -208,7 +209,7 @@ local function get_objdump()
 
   -- Check the presence of the ELF file
   if vim.fn.filereadable(config.binary_file) ~= 1 then
-    if not vim.b.enable_compilation then
+    if not vim.b[bufnr].enable_compilation then
       vim.notify("the file '" .. config.binary_file .. "' is not readable", vim.log.levels.WARN)
       return 1
     else
@@ -219,8 +220,8 @@ local function get_objdump()
   end
 
   -- Check if the binary file has debug informations
-  vim.b.has_debug_info = vim.fn.system("file " .. config.binary_file)
-  if vim.fn.match(vim.b.has_debug_info, "with debug_info") == -1 then
+  vim.b[bufnr].has_debug_info = vim.fn.system("file " .. config.binary_file)
+  if vim.fn.match(vim.b[bufnr].has_debug_info, "with debug_info") == -1 then
     vim.notify("the file '" .. config.binary_file .. "' does not have debug information", vim.log.levels.WARN)
     return 1
   end
@@ -234,7 +235,7 @@ local function get_objdump()
   elseif objdump_return_code == 128 then
     -- Check if the C source code is more recent than the object file
     -- Try to recompile and redump the objdump content
-    if not vim.b.enable_compilation then
+    if not vim.b[bufnr].enable_compilation then
       vim.notify("Automatic compilation is disabled for this buffer; we can not have a up-to-date ELF file to work on...", vim.log.levels.WARN)
       return 1
     else
@@ -252,103 +253,103 @@ end
 -- " Data processing
 -- """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-local function searchCurrentLine()
+---@param lines string[]
+---@return number -- start
+---@return number -- end
+local function searchCurrentLine(lines)
   -- Search the current line
   local lineno = vim.fn.line '.'
   local pos_current_line_in_asm = { "", -1 }
   local lines_searched = 0
 
   while pos_current_line_in_asm[2] < 0 do
-    pos_current_line_in_asm = vim.fn.matchstrpos(vim.b.objdump_asm_output, vim.fn.expand('%:t') .. ':' .. lineno .. [[\(\s*(discriminator \d*)\)*$]])
+    pos_current_line_in_asm = vim.fn.matchstrpos(lines, vim.fn.expand('%:t') .. ':' .. lineno .. [[\(\s*(discriminator \d*)\)*$]])
 
     lineno = lineno + 1
 
     lines_searched = lines_searched + 1
     if lines_searched >= 20 then
       vim.notify('This line is not included in the asm file', vim.log.levels.WARN)
-      return { -1, -1 }
+      return -1, -1
     end
   end
 
   -- Search the next occurrence of the filename
-  local pos_next_line_in_asm = vim.fn.matchstrpos(vim.b.objdump_asm_output, vim.fn.expand('%:t') .. ':', pos_current_line_in_asm[2] + 1)
+  local pos_next_line_in_asm = vim.fn.matchstrpos(lines, vim.fn.expand('%:t') .. ':', pos_current_line_in_asm[2] + 1)
 
   -- If not found, it's probably because this code block is at the end of a section. This will search the start of the next section.
   if pos_next_line_in_asm[2] == -1 then
-    pos_next_line_in_asm = vim.fn.matchstrpos(vim.b.objdump_asm_output, [[\v^\x+\s*]], pos_current_line_in_asm[2] + 1)
+    pos_next_line_in_asm = vim.fn.matchstrpos(lines, [[\v^\x+\s*]], pos_current_line_in_asm[2] + 1)
   end
 
-  return { pos_current_line_in_asm[2], pos_next_line_in_asm[2] }
+  return pos_current_line_in_asm[2], pos_next_line_in_asm[2]
 end
 
 -- """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 -- " Main functions
 -- """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-function M.disassemble_Disassemble()
+function M.disassemble()
   local bufnr = vim.api.nvim_get_current_buf()
 
-  -- Close the current window if we are already in a popup buffer and want to
-  -- get a popup, which make no sense in this context
-  if vim.b.disassemble_this_is_a_popup_buffer then
+  -- popup already exists, so we just focus it
+  if vim.b[bufnr].disasm_popup_ref then
+    M.focus_popup()
+    return 0
+  end
+
+  -- Close the current window if we are already in a popup buffer
+  -- and want to get a popup, which makes no sense in this context
+  if vim.b[bufnr].disasm_is_popup then
     vim.api.nvim_win_close(0, true)
     return 0
   end
 
   if vim.g.disassemble_autosave then
-    vim.cmd [[silent! write]]
+    vim.api.nvim_command [[write]]
   end
 
   -- Load the configuration for this buffer
-  prepare()
-
-  -- Remove or focus the popup
-  if vim.b.disassemble_popup_window_id then
-    if vim.g.disassemble_focus_on_second_call then
-      M.disassemble_Focus()
-      return 0
-    else
-      M.disassemble_Close()
-    end
-  end
+  prepare(bufnr)
 
   -- Extract the objdump content to the correct buffer variables
   if get_objdump() == 1 then
     return 1
   end
 
-  local res = searchCurrentLine()
-  local pos_current_line_in_asm, pos_next_line_in_asm = res[1], res[2]
-  if pos_current_line_in_asm == -1 then
+  local asm = vim.b[bufnr].objdump_asm_output
+  local asm_top, asm_bot = searchCurrentLine(asm)
+  if asm_top == -1 then
     return 1
   end
 
   -- Only select the current chunk of asm
-  vim.b.objdump_asm_output = {unpack(vim.b.objdump_asm_output, pos_current_line_in_asm + 1, pos_next_line_in_asm)}
+  local content = {unpack(asm, asm_top + 1, asm_bot)}
 
-  -- Set the popup options
-  local width  = vim.fn.max(vim.fn.map(vim.fn.copy(vim.b.objdump_asm_output), "strlen(v:val)"))
-  local height = pos_next_line_in_asm - pos_current_line_in_asm
+  -- Popup size
+  local width  = vim.fn.max(vim.fn.map(content, "strlen(v:val)"))
+  local height = asm_bot - asm_top
 
   -- Create the popup window
   local buf = vim.api.nvim_create_buf(false, true)
-  local opts = {
+  local win = vim.api.nvim_open_win(buf, false, {
     relative  = 'cursor',
     width     = width,
     height    = height,
     col       = 0,
     row       = 1,
-    anchor    = "NW",
-    style     = "minimal",
+    anchor    = 'NW',
+    style     = 'minimal',
+    border    = 'rounded',
     focusable = true,
-  }
+  })
 
-  vim.b.disassemble_popup_window_id = vim.api.nvim_open_win(buf, false, opts)
+  vim.api.nvim_buf_set_lines(buf, 0, height, false, content)
+  vim.api.nvim_buf_set_option(buf, 'filetype', 'asm')
+  vim.api.nvim_buf_set_var(buf, 'disasm_is_popup', true)
+  vim.api.nvim_win_set_cursor(win, { 1, 0 })
 
-  vim.api.nvim_buf_set_lines(buf, 0, height, false, vim.b.objdump_asm_output)
-  vim.api.nvim_buf_set_option(buf, "filetype", "asm")
-  vim.api.nvim_buf_set_var(buf, "disassemble_this_is_a_popup_buffer", true)
-  vim.api.nvim_win_set_cursor(vim.b.disassemble_popup_window_id, { 1, 0 })
+  vim.b[bufnr].disasm_popup_ref = win
 
   vim.api.nvim_create_autocmd({ 'CursorMoved', 'BufLeave' }, {
     group = vim.api.nvim_create_augroup('disassembleOnCursorMoveGroup', { clear = true }),
@@ -357,68 +358,74 @@ function M.disassemble_Disassemble()
   })
 end
 
-function M.disassemble_DisassembleFull()
+function M.disassemble_full()
   local bufnr = vim.api.nvim_get_current_buf()
 
   if vim.g.disassemble_autosave then
-    vim.cmd [[silent! write]]
+    vim.api.nvim_command [[write]]
   end
 
   --  the configuration for this buffer
-  prepare()
+  prepare(bufnr)
 
   -- Extract the objdump content to the correct buffer variables
   if get_objdump() == 1 then
     return 1
   end
 
-  local pos_current_line_in_asm = searchCurrentLine()[1]
-  if pos_current_line_in_asm == -1 then
+  local asm = vim.b[bufnr].objdump_asm_output
+  local asm_top = searchCurrentLine(asm)
+  if asm_top == -1 then
     return 1
   end
 
   -- Create or reuse the last buffer
-  if not vim.b.buffer_full_asm then
-    vim.b.buffer_full_asm = vim.api.nvim_create_buf(true, true)
-    vim.api.nvim_buf_set_name(vim.b.buffer_full_asm, "[Disassembled] " .. vim.b[bufnr].disassemble_config["binary_file"])
+  if not vim.b[bufnr].buffer_full_asm then
+    vim.b[bufnr].buffer_full_asm = vim.api.nvim_create_buf(true, true)
+    vim.api.nvim_buf_set_name(vim.b[bufnr].buffer_full_asm, "[Disassembled] " .. vim.b[bufnr].disassemble_config["binary_file"])
   else
-    vim.api.nvim_buf_set_option(vim.b.buffer_full_asm, "readonly", false)
+    vim.api.nvim_buf_set_option(vim.b[bufnr].buffer_full_asm, "readonly", false)
   end
 
   -- Set the content to the buffer
-  vim.api.nvim_buf_set_lines(vim.b.buffer_full_asm, 0, 0, false, vim.b.objdump_asm_output)
+  vim.api.nvim_buf_set_lines(vim.b[bufnr].buffer_full_asm, 0, 0, false, vim.b[bufnr].objdump_asm_output)
 
   -- Set option for that buffer
-  vim.api.nvim_buf_set_option(vim.b.buffer_full_asm, "filetype", "asm")
-  vim.api.nvim_buf_set_option(vim.b.buffer_full_asm, "readonly", true)
+  vim.api.nvim_buf_set_option(vim.b[bufnr].buffer_full_asm, "filetype", "asm")
+  vim.api.nvim_buf_set_option(vim.b[bufnr].buffer_full_asm, "readonly", true)
 
   -- Focus the buffer
   vim.cmd [[execute 'buffer ' . b:buffer_full_asm]]
 
   -- Open the current line
-  vim.api.nvim_win_set_cursor(0, { pos_current_line_in_asm+2, 0 })
+  vim.api.nvim_win_set_cursor(0, { asm_top+2, 0 })
 end
 
 function M.disassemble_Close()
-  local bufnr = vim.api.nvim_get_current_buf()
+  local bufnr  = vim.api.nvim_get_current_buf()
 
-  if vim.b.auto_close then
-    if vim.b.disassemble_popup_window_id then
-      vim.api.nvim_win_close(vim.b.disassemble_popup_window_id, true)
-      vim.b.disassemble_popup_window_id = false
+  if vim.b[bufnr].auto_close then
+    local ref = vim.b[bufnr].disasm_popup_ref
 
-      -- Remove the autocmd for the files for performances reasons
-      vim.api.nvim_clear_autocmds({ group = 'disassembleOnCursorMoveGroup' })
+    if ref and vim.api.nvim_win_is_valid(ref) then
+      vim.api.nvim_win_close(ref, true)
     end
+
+    vim.b[bufnr].disasm_popup_ref = false
+    -- Remove the autocmd for the files for performances reasons
+    vim.api.nvim_clear_autocmds({ group = 'disassembleOnCursorMoveGroup' })
   else
-    vim.b.auto_close = true
+    vim.b[bufnr].auto_close = true
   end
 end
 
-function M.disassemble_Focus()
-  vim.b.auto_close = false
-  if vim.b.disassemble_popup_window_id then
-    vim.api.nvim_set_current_win(vim.b.disassemble_popup_window_id)
+function M.focus_popup()
+  local bufnr  = vim.api.nvim_get_current_buf()
+  local buffer = vim.b[bufnr]
+
+  buffer.auto_close = false
+  if buffer.disasm_popup_ref then
+    vim.api.nvim_set_current_win(buffer.disasm_popup_ref)
   else
     vim.notify("No popup at the moment", vim.log.levels.WARN)
   end
