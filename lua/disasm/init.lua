@@ -11,6 +11,8 @@ local M = {
 
 
 function M.setup()
+  vim.g.disasm_ns = vim.api.nvim_create_namespace 'disasm'
+  vim.api.nvim_set_hl(0, 'DisasmCurrent', { fg = '#ffffff', bg = '#333333' })
 end
 
 

@@ -254,11 +254,11 @@ end
 -- """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 ---@param lines string[]
+---@param lineno number
 ---@return number -- start
 ---@return number -- end
-local function searchCurrentLine(lines)
+local function search_asm_line(lines, lineno)
   -- Search the current line
-  local lineno = vim.fn.line '.'
   local pos_current_line_in_asm = { "", -1 }
   local lines_searched = 0
 
@@ -317,8 +317,9 @@ function M.disassemble()
     return 1
   end
 
+  local line = vim.fn.line '.'
   local asm = vim.b[bufnr].objdump_asm_output
-  local asm_top, asm_bot = searchCurrentLine(asm)
+  local asm_top, asm_bot = search_asm_line(asm, line)
   if asm_top == -1 then
     return 1
   end
@@ -358,6 +359,28 @@ function M.disassemble()
   })
 end
 
+local function update_aside()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local asm = vim.b[bufnr].objdump_asm_output
+  local buf = vim.b[bufnr].disasm_aside_buf
+  local win = vim.b[bufnr].disasm_aside_win
+  if not asm or not vim.api.nvim_buf_is_valid(buf) or not vim.api.nvim_win_is_valid(win) then return end
+
+  local line = vim.fn.line '.'
+  local s, e = search_asm_line(asm, line)
+  if s == -1 then return end
+
+  vim.api.nvim_win_set_cursor(win, { s + 2, 0 })
+
+  local ns = vim.g.disasm_ns
+  vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+  for i = s, e, 1 do
+    if asm[i + 1]:match [[^%s+%w+:%s+.+$]] then
+      vim.api.nvim_buf_add_highlight(buf, ns, 'DisasmCurrent', i, 0, -1)
+    end
+  end
+end
+
 function M.disassemble_full()
   local bufnr = vim.api.nvim_get_current_buf()
 
@@ -373,32 +396,44 @@ function M.disassemble_full()
     return 1
   end
 
+  local line = vim.fn.line '.'
   local asm = vim.b[bufnr].objdump_asm_output
-  local asm_top = searchCurrentLine(asm)
+  local asm_top = search_asm_line(asm, line)
   if asm_top == -1 then
     return 1
   end
 
-  -- Create or reuse the last buffer
-  if not vim.b[bufnr].buffer_full_asm then
-    vim.b[bufnr].buffer_full_asm = vim.api.nvim_create_buf(true, true)
-    vim.api.nvim_buf_set_name(vim.b[bufnr].buffer_full_asm, "[Disassembled] " .. vim.b[bufnr].disassemble_config["binary_file"])
+  -- Buffer
+  local buf = vim.b[bufnr].disasm_aside_buf
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then
+    buf = vim.api.nvim_create_buf(true, true)
+    vim.api.nvim_buf_set_option(buf, 'filetype', 'asm')
+    vim.api.nvim_buf_set_name(buf, '[Disassembled] ' .. vim.b[bufnr].disassemble_config['binary_file'])
   else
-    vim.api.nvim_buf_set_option(vim.b[bufnr].buffer_full_asm, "readonly", false)
+    vim.api.nvim_buf_set_option(buf, 'readonly', false)
   end
+  vim.api.nvim_buf_set_lines(buf, 0, 0, false, asm)
+  vim.api.nvim_buf_set_option(buf, 'readonly', true)
+  vim.b[bufnr].disasm_aside_buf = buf
 
-  -- Set the content to the buffer
-  vim.api.nvim_buf_set_lines(vim.b[bufnr].buffer_full_asm, 0, 0, false, vim.b[bufnr].objdump_asm_output)
+  -- Window
+  local win = vim.b[bufnr].disasm_aside_win
+  if not win or not vim.api.nvim_win_is_valid(win) then
+    local old = vim.api.nvim_get_current_win()
+    vim.cmd [[vsplit]]
+    win = vim.api.nvim_get_current_win()
+    vim.api.nvim_set_current_win(old)
+  end
+  vim.api.nvim_win_set_buf(win, buf)
+  vim.api.nvim_win_set_cursor(win, { asm_top + 2, 0 })
+  vim.b[bufnr].disasm_aside_win = win
 
-  -- Set option for that buffer
-  vim.api.nvim_buf_set_option(vim.b[bufnr].buffer_full_asm, "filetype", "asm")
-  vim.api.nvim_buf_set_option(vim.b[bufnr].buffer_full_asm, "readonly", true)
-
-  -- Focus the buffer
-  vim.cmd [[execute 'buffer ' . b:buffer_full_asm]]
-
-  -- Open the current line
-  vim.api.nvim_win_set_cursor(0, { asm_top+2, 0 })
+  -- Auto-move
+  vim.api.nvim_create_autocmd({ 'CursorMoved' }, {
+    group = vim.api.nvim_create_augroup('disasm_aside_move', { clear = true }),
+    pattern = { '*.c', '*.cpp' },
+    callback = update_aside,
+  })
 end
 
 function M.disassemble_Close()
